@@ -1,0 +1,2098 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>剣道会 出欠・入館・掃除当番管理</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700;900&display=swap" rel="stylesheet">
+<style>
+  /* アプリ全体をゴシック体で統一 */
+  * {
+    font-family: "Noto Sans JP", "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Yu Gothic", "Meiryo", sans-serif !important;
+    box-sizing: border-box;
+  }
+  body {
+    background-color: #f1f5f9;
+    color: #0f172a;
+    padding-bottom: env(safe-area-inset-bottom, 24px);
+    -webkit-tap-highlight-color: transparent;
+  }
+  /* スクロールバー調整 */
+  .table-scroll::-webkit-scrollbar {
+    height: 6px;
+  }
+  .table-scroll::-webkit-scrollbar-thumb {
+    background: #cbd5e1;
+    border-radius: 9999px;
+  }
+  /* チェックボックスの押しやすさ向上 */
+  .chk-pill input:checked + span {
+    font-weight: 700;
+  }
+</style>
+</head>
+<body class="min-h-screen text-slate-900">
+
+<!-- ヘッダー -->
+<header class="bg-slate-900 text-white sticky top-0 z-30 shadow-md">
+  <div class="max-w-3xl mx-auto px-3 py-2.5 flex items-center justify-between gap-2">
+    <div class="flex items-center gap-2">
+      <span class="bg-amber-400 text-slate-950 font-black text-xs px-2 py-1 rounded">剣道会</span>
+      <h1 class="text-base sm:text-lg font-bold tracking-tight">出欠・入館・掃除当番管理</h1>
+    </div>
+    <div id="editBadge" class="hidden bg-amber-500 text-slate-950 text-xs font-bold px-2.5 py-1 rounded-full animate-pulse">
+      過去データ編集中
+    </div>
+  </div>
+  <!-- 4タブナビゲーション -->
+  <nav class="max-w-3xl mx-auto grid grid-cols-4 bg-slate-800 border-t border-slate-700 text-xs sm:text-sm font-bold">
+    <button type="button" data-tab="att" class="tab-btn py-3 text-center border-b-4 border-amber-400 text-amber-300 bg-slate-900/60 transition">
+      ① 出欠入力
+    </button>
+    <button type="button" data-tab="sum" class="tab-btn py-3 text-center border-b-4 border-transparent text-slate-300 hover:text-white transition">
+      ② 集計・PDF
+    </button>
+    <button type="button" data-tab="his" class="tab-btn py-3 text-center border-b-4 border-transparent text-slate-300 hover:text-white transition">
+      ③ 過去の稽古
+    </button>
+    <button type="button" data-tab="mas" class="tab-btn py-3 text-center border-b-4 border-transparent text-slate-300 hover:text-white transition">
+      ④ 名簿・会場
+    </button>
+  </nav>
+</header>
+
+<!-- 通知トースト（alert()の代替） -->
+<div id="toast" class="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 hidden max-w-[92vw] bg-slate-900 text-white text-sm font-bold px-4 py-3 rounded-xl shadow-xl border border-slate-700 text-center"></div>
+
+<main class="max-w-3xl mx-auto p-3 sm:p-4 space-y-4">
+
+  <!-- ========================================================= -->
+  <!-- タブ1: 出欠入力 -->
+  <!-- ========================================================= -->
+  <section id="tab-att" class="space-y-4">
+    <!-- 編集モード中の案内バー -->
+    <div id="editBanner" class="hidden bg-amber-50 border-2 border-amber-400 rounded-xl p-3 flex flex-wrap items-center justify-between gap-2">
+      <div class="text-sm font-bold text-amber-950">
+        <span id="editBannerText">過去の稽古データを編集中です</span>
+      </div>
+      <button type="button" id="cancelEditBtn" class="text-xs font-bold bg-white border border-amber-400 text-amber-900 px-3 py-2 rounded-lg active:bg-amber-100">
+        編集をやめて新規入力に戻る
+      </button>
+    </div>
+
+    <!-- 最上部：日付・曜日・時刻・会場 -->
+    <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-3.5 sm:p-4 space-y-3">
+      <div class="flex items-center justify-between border-b border-slate-100 pb-2">
+        <h2 class="font-bold text-sm sm:text-base text-slate-800">稽古の基本情報</h2>
+        <span id="liveTotalBadge" class="bg-blue-50 text-blue-800 border border-blue-200 text-xs sm:text-sm font-bold px-2.5 py-1 rounded-lg">
+          現在の入館総数：0名
+        </span>
+      </div>
+
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <!-- 日付と自動曜日 -->
+        <div>
+          <label class="block text-xs font-bold text-slate-600 mb-1">稽古日・曜日</label>
+          <div class="flex items-center gap-2">
+            <input type="date" id="attDate" class="flex-1 border border-slate-300 rounded-xl px-3 py-2.5 text-base font-bold bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+            <span id="attWeekday" class="bg-slate-800 text-white font-bold text-sm px-3 py-2.5 rounded-xl min-w-[3.5rem] text-center">
+              (土)
+            </span>
+          </div>
+        </div>
+
+        <!-- 会場・体育館選択 -->
+        <div>
+          <label class="block text-xs font-bold text-slate-600 mb-1">会場・体育館</label>
+          <select id="attGym" class="w-full border border-slate-300 rounded-xl px-3 py-2.5 text-base font-bold bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+          </select>
+        </div>
+      </div>
+
+      <!-- 開始時刻・終了時刻（24時間表記・10分刻み・現在時刻自動入力なし） -->
+      <div class="grid grid-cols-2 gap-3">
+        <div>
+          <label class="block text-xs font-bold text-slate-600 mb-1">開始時刻（24時間）</label>
+          <div class="grid grid-cols-2 gap-1.5">
+            <select id="startHour" aria-label="開始時" class="border border-slate-300 rounded-xl px-2 py-2.5 text-base font-bold bg-slate-50"></select>
+            <select id="startMin" aria-label="開始分" class="border border-slate-300 rounded-xl px-2 py-2.5 text-base font-bold bg-slate-50"></select>
+          </div>
+        </div>
+        <div>
+          <label class="block text-xs font-bold text-slate-600 mb-1">終了時刻（24時間）</label>
+          <div class="grid grid-cols-2 gap-1.5">
+            <select id="endHour" aria-label="終了時" class="border border-slate-300 rounded-xl px-2 py-2.5 text-base font-bold bg-slate-50"></select>
+            <select id="endMin" aria-label="終了分" class="border border-slate-300 rounded-xl px-2 py-2.5 text-base font-bold bg-slate-50"></select>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 生徒一覧（在籍＋入会検討中＋退会済表示） -->
+    <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-3.5 sm:p-4 space-y-3">
+      <div class="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-2">
+        <div>
+          <h2 class="font-bold text-sm sm:text-base text-slate-800">生徒の出欠・付き添いチェック</h2>
+          <p class="text-xs text-slate-500 mt-0.5">出席と公欠のどちらもOFFの場合は「欠席（皆勤対象外）」になります</p>
+        </div>
+        <button type="button" id="resetDefaultAttBtn" class="text-xs font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-2 rounded-lg border border-slate-300">
+          標準状態に戻す
+        </button>
+      </div>
+
+      <!-- 凡例 -->
+      <div class="flex flex-wrap gap-2 text-[11px] text-slate-600 bg-slate-50 p-2 rounded-xl border border-slate-200">
+        <span class="inline-flex items-center gap-1"><span class="inline-block px-1.5 py-0.5 bg-amber-100 border-2 border-amber-500 text-amber-900 font-bold rounded">検討</span> 入会検討中（入館数に含む）</span>
+        <span class="inline-flex items-center gap-1"><span class="inline-block px-1.5 py-0.5 bg-red-100 border-2 border-red-500 text-red-800 font-bold rounded">退会</span> 退会済（初期出席OFF）</span>
+      </div>
+
+      <div id="studentAttList" class="divide-y divide-slate-200">
+        <!-- JSで描画 -->
+      </div>
+    </div>
+
+    <!-- 先生（指導者）枠 -->
+    <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-3.5 sm:p-4 space-y-3">
+      <div class="border-b border-slate-100 pb-2">
+        <h2 class="font-bold text-sm sm:text-base text-slate-800">先生（指導者・高校生以上）の出欠</h2>
+        <p class="text-xs text-slate-500 mt-0.5">生徒の行で「先生として出席」にチェックした先生は自動で連動し、二重カウントされません</p>
+      </div>
+      <div id="teacherAttList" class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+        <!-- JSで描画 -->
+      </div>
+    </div>
+
+    <!-- 出稽古枠（他道場からの参加者） -->
+    <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-3.5 sm:p-4 space-y-3">
+      <div class="flex items-center justify-between border-b border-slate-100 pb-2">
+        <div>
+          <h2 class="font-bold text-sm sm:text-base text-slate-800">出稽古（他道場からの参加者）</h2>
+          <p class="text-xs text-slate-500 mt-0.5">名簿に残さない当日のみの参加者を記録します</p>
+        </div>
+        <button type="button" id="addVisitorBtn" class="bg-emerald-600 hover:bg-emerald-700 text-white text-xs sm:text-sm font-bold px-3 py-2 rounded-xl shadow-sm">
+          ＋ 生徒を追加
+        </button>
+      </div>
+
+      <!-- 出稽古の生徒リスト -->
+      <div id="visitorStudentList" class="space-y-2.5">
+        <!-- JSで描画 -->
+      </div>
+
+      <!-- 出稽古の大人（先生・保護者）男女カウント -->
+      <div class="bg-slate-50 border border-slate-200 rounded-xl p-3 mt-2">
+        <div class="text-xs font-bold text-slate-700 mb-2">出稽古の大人（他道場の先生・保護者）人数</div>
+        <div class="grid grid-cols-2 gap-3">
+          <div class="flex items-center justify-between bg-white border border-slate-200 rounded-xl px-3 py-2">
+            <span class="text-sm font-bold text-blue-800">大人 男性</span>
+            <div class="flex items-center gap-2">
+              <button type="button" data-vadult="m" data-delta="-1" class="w-9 h-9 rounded-lg bg-slate-100 border border-slate-300 font-bold text-lg active:bg-slate-200">−</button>
+              <span id="visitorAdultM" class="w-6 text-center font-black text-base">0</span>
+              <button type="button" data-vadult="m" data-delta="1" class="w-9 h-9 rounded-lg bg-blue-600 text-white font-bold text-lg active:bg-blue-700">＋</button>
+            </div>
+          </div>
+          <div class="flex items-center justify-between bg-white border border-slate-200 rounded-xl px-3 py-2">
+            <span class="text-sm font-bold text-rose-700">大人 女性</span>
+            <div class="flex items-center gap-2">
+              <button type="button" data-vadult="f" data-delta="-1" class="w-9 h-9 rounded-lg bg-slate-100 border border-slate-300 font-bold text-lg active:bg-slate-200">−</button>
+              <span id="visitorAdultF" class="w-6 text-center font-black text-base">0</span>
+              <button type="button" data-vadult="f" data-delta="1" class="w-9 h-9 rounded-lg bg-rose-600 text-white font-bold text-lg active:bg-rose-700">＋</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 次へ進むショートカット -->
+    <div class="pt-1">
+      <button type="button" id="goSumBtn" class="w-full bg-slate-900 hover:bg-slate-800 text-white font-bold text-base py-3.5 rounded-2xl shadow-md">
+        ② 集計・掃除当番・PDF画面へ進む →
+      </button>
+    </div>
+  </section>
+
+  <!-- ========================================================= -->
+  <!-- タブ2: 集計・PDF -->
+  <!-- ========================================================= -->
+  <section id="tab-sum" class="hidden space-y-4">
+    <!-- 最上部：本日の掃除当番（3人）枠 -->
+    <div class="bg-white rounded-2xl shadow-sm border-2 border-amber-300 p-3.5 sm:p-4 space-y-3">
+      <div class="flex flex-wrap items-center justify-between gap-2 border-b border-amber-100 pb-2">
+        <div>
+          <h2 class="font-bold text-base text-slate-900 flex items-center gap-1.5">
+            <span class="bg-amber-400 text-slate-950 text-xs font-black px-2 py-0.5 rounded">3名選出</span>
+            本日の掃除当番
+          </h2>
+          <p class="text-xs text-slate-600 mt-0.5">出席中の生徒から、累計回数が少ない順にランダムで均等に3人を選びます</p>
+        </div>
+        <button type="button" id="pickDutyBtn" class="bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold text-xs sm:text-sm px-3.5 py-2.5 rounded-xl shadow-sm active:scale-[0.99]">
+          ランダム選出（3人）
+        </button>
+      </div>
+
+      <div id="dutySlots" class="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+        <!-- JSで描画 -->
+      </div>
+    </div>
+
+    <!-- 中段：横に見れる入館者集計表 -->
+    <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-3.5 sm:p-4 space-y-3">
+      <div class="flex items-center justify-between">
+        <h2 class="font-bold text-base text-slate-900">体育館 入館者集計表</h2>
+        <span id="sumHeaderMeta" class="text-xs font-bold text-slate-500"></span>
+      </div>
+
+      <div class="table-scroll overflow-x-auto border border-slate-300 rounded-xl">
+        <table class="w-full text-center border-collapse min-w-[560px] text-xs sm:text-sm">
+          <thead>
+            <tr class="bg-slate-800 text-white font-bold">
+              <th class="p-2 border-r border-slate-600" colspan="3">大人</th>
+              <th class="p-2 border-r border-slate-600" colspan="3">中学生</th>
+              <th class="p-2 border-r border-slate-600" colspan="3">小学生</th>
+              <th class="p-2 border-r border-slate-600" colspan="3">幼児</th>
+              <th class="p-2 bg-amber-500 text-slate-950" rowspan="2">総数</th>
+            </tr>
+            <tr class="bg-slate-100 text-slate-800 font-bold border-b border-slate-300">
+              <th class="p-1.5 border-r border-slate-200 text-blue-800">男</th>
+              <th class="p-1.5 border-r border-slate-200 text-rose-700">女</th>
+              <th class="p-1.5 border-r border-slate-300 bg-slate-200/70">全</th>
+              <th class="p-1.5 border-r border-slate-200 text-blue-800">男</th>
+              <th class="p-1.5 border-r border-slate-200 text-rose-700">女</th>
+              <th class="p-1.5 border-r border-slate-300 bg-slate-200/70">全</th>
+              <th class="p-1.5 border-r border-slate-200 text-blue-800">男</th>
+              <th class="p-1.5 border-r border-slate-200 text-rose-700">女</th>
+              <th class="p-1.5 border-r border-slate-300 bg-slate-200/70">全</th>
+              <th class="p-1.5 border-r border-slate-200 text-blue-800">男</th>
+              <th class="p-1.5 border-r border-slate-200 text-rose-700">女</th>
+              <th class="p-1.5 border-r border-slate-300 bg-slate-200/70">全</th>
+            </tr>
+          </thead>
+          <tbody id="summaryTableBody" class="font-bold text-base bg-white">
+            <!-- JSで描画 -->
+          </tbody>
+        </table>
+      </div>
+      <div id="summaryBreakdownText" class="text-xs text-slate-600 bg-slate-50 p-2.5 rounded-xl border border-slate-200 leading-relaxed">
+      </div>
+    </div>
+
+    <!-- 下部：PDF作成ボタン ＆ 集計完了（更新）ボタン -->
+    <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-3.5 sm:p-4 space-y-3">
+      <h2 class="font-bold text-sm sm:text-base text-slate-800">帳票出力（A4縦PDF）・データ確定</h2>
+      <p class="text-xs text-slate-500">
+        PDFには出席した先生（名字＋先生）と、学年別の生徒一覧（欠席の生徒のみ赤字で「欠」）を出力します。
+      </p>
+
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+        <button type="button" id="createPdfBtn" class="w-full bg-rose-700 hover:bg-rose-800 text-white font-bold text-base py-3.5 px-4 rounded-2xl shadow-sm flex items-center justify-center gap-2">
+          <span>PDF作成（A4縦）</span>
+        </button>
+
+        <button type="button" id="completeBtn" class="w-full bg-blue-700 hover:bg-blue-800 text-white font-bold text-base py-3.5 px-4 rounded-2xl shadow-md flex items-center justify-center gap-2">
+          <span id="completeBtnText">集計完了</span>
+        </button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ========================================================= -->
+  <!-- タブ3: 過去の稽古 -->
+  <!-- ========================================================= -->
+  <section id="tab-his" class="hidden space-y-4">
+    <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-3.5 sm:p-4 space-y-3">
+      <div class="border-b border-slate-100 pb-2">
+        <h2 class="font-bold text-base text-slate-900">過去の稽古履歴</h2>
+        <p class="text-xs text-slate-500 mt-0.5">「編集する」を押すと、その日の出欠（公欠への変更など）や掃除当番を修正して「更新」できます</p>
+      </div>
+      <div id="historyList" class="space-y-3">
+        <!-- JSで描画 -->
+      </div>
+    </div>
+  </section>
+
+  <!-- ========================================================= -->
+  <!-- タブ4: 名簿・会場 -->
+  <!-- ========================================================= -->
+  <section id="tab-mas" class="hidden space-y-4">
+    <!-- 年度選択（4月〜3月の皆勤賞判定用） -->
+    <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-3.5 sm:p-4 flex flex-wrap items-center justify-between gap-2">
+      <div>
+        <h2 class="font-bold text-sm sm:text-base text-slate-900">年度別の皆勤賞・掃除当番集計</h2>
+        <p class="text-xs text-slate-500">4月1日〜翌年3月31日（出席＋公欠のみで欠席0回が皆勤賞対象）</p>
+      </div>
+      <select id="fiscalYearSelect" class="border border-slate-300 rounded-xl px-3 py-2 text-sm font-bold bg-slate-50">
+      </select>
+    </div>
+
+    <!-- 生徒名簿管理 -->
+    <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-3.5 sm:p-4 space-y-3">
+      <div class="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-2">
+        <div>
+          <h2 class="font-bold text-base text-slate-900">生徒名簿（中学生〜年少・入会検討中）</h2>
+          <p class="text-xs text-slate-500">学年を選ぶと誕生日年齢が自動入力されます（手入力で上書き可）</p>
+        </div>
+        <button type="button" id="addStudentBtn" class="bg-blue-700 hover:bg-blue-800 text-white text-xs sm:text-sm font-bold px-3.5 py-2.5 rounded-xl shadow-sm">
+          ＋ 生徒を追加
+        </button>
+      </div>
+
+      <!-- 生徒追加・編集フォーム（モーダル風インラインカード） -->
+      <div id="studentFormCard" class="hidden bg-blue-50/70 border-2 border-blue-300 rounded-2xl p-3.5 space-y-3">
+        <div class="flex items-center justify-between">
+          <h3 id="studentFormTitle" class="font-bold text-sm text-blue-950">新しい生徒を登録</h3>
+          <button type="button" id="closeStudentFormBtn" class="text-xs font-bold text-slate-600 bg-white px-2.5 py-1 rounded-lg border border-slate-300">閉じる</button>
+        </div>
+        <input type="hidden" id="editStudentId">
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs font-bold text-slate-700 mb-1">氏名（フルネーム必須）</label>
+            <input type="text" id="stName" placeholder="例：山田 太郎" class="w-full border border-slate-300 rounded-xl px-3 py-2 text-sm font-bold bg-white">
+          </div>
+          <div>
+            <label class="block text-xs font-bold text-slate-700 mb-1">性別</label>
+            <select id="stSex" class="w-full border border-slate-300 rounded-xl px-3 py-2 text-sm font-bold bg-white">
+              <option value="男">男</option>
+              <option value="女">女</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-xs font-bold text-slate-700 mb-1">学年（中3〜年少）</label>
+            <select id="stGrade" class="w-full border border-slate-300 rounded-xl px-3 py-2 text-sm font-bold bg-white">
+              <option value="中3">中3</option>
+              <option value="中2">中2</option>
+              <option value="中1">中1</option>
+              <option value="小6">小6</option>
+              <option value="小5">小5</option>
+              <option value="小4">小4</option>
+              <option value="小3">小3</option>
+              <option value="小2">小2</option>
+              <option value="小1">小1</option>
+              <option value="年長">年長</option>
+              <option value="年中">年中</option>
+              <option value="年少">年少</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-xs font-bold text-slate-700 mb-1">年齢（その年の誕生日年齢・手入力可）</label>
+            <input type="number" id="stAge" min="2" max="20" placeholder="自動入力" class="w-full border border-slate-300 rounded-xl px-3 py-2 text-sm font-bold bg-white">
+          </div>
+          <div>
+            <label class="block text-xs font-bold text-slate-700 mb-1">段位・級位（級位は10級まで）</label>
+            <select id="stRank" class="w-full border border-slate-300 rounded-xl px-3 py-2 text-sm font-bold bg-white">
+              <option value="無級">無級</option>
+              <option value="10級">10級</option>
+              <option value="9級">9級</option>
+              <option value="8級">8級</option>
+              <option value="7級">7級</option>
+              <option value="6級">6級</option>
+              <option value="5級">5級</option>
+              <option value="4級">4級</option>
+              <option value="3級">3級</option>
+              <option value="2級">2級</option>
+              <option value="1級">1級</option>
+              <option value="初段">初段</option>
+              <option value="二段">二段</option>
+              <option value="三段">三段</option>
+              <option value="四段">四段</option>
+              <option value="五段">五段</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-xs font-bold text-slate-700 mb-1">入会日（任意）</label>
+            <input type="date" id="stJoinDate" class="w-full border border-slate-300 rounded-xl px-3 py-2 text-sm font-bold bg-white">
+          </div>
+        </div>
+
+        <!-- ステータス選択：通常 / 入会検討中 / 退会済 -->
+        <div class="bg-white border border-slate-200 rounded-xl p-2.5 flex flex-wrap items-center gap-4">
+          <span class="text-xs font-bold text-slate-700">在籍区分：</span>
+          <label class="inline-flex items-center gap-1.5 text-sm font-bold cursor-pointer">
+            <input type="radio" name="stStatus" value="active" checked class="w-4 h-4">
+            <span>通常在籍</span>
+          </label>
+          <label class="inline-flex items-center gap-1.5 text-sm font-bold text-amber-800 cursor-pointer">
+            <input type="radio" name="stStatus" value="trial" class="w-4 h-4">
+            <span>入会検討中（黄色枠）</span>
+          </label>
+          <label class="inline-flex items-center gap-1.5 text-sm font-bold text-red-700 cursor-pointer">
+            <input type="radio" name="stStatus" value="withdrawn" class="w-4 h-4">
+            <span>退会済（赤枠）</span>
+          </label>
+        </div>
+
+        <button type="button" id="saveStudentBtn" class="w-full bg-blue-700 hover:bg-blue-800 text-white font-bold text-sm py-3 rounded-xl shadow-sm">
+          生徒情報を保存する
+        </button>
+      </div>
+
+      <div id="masterStudentList" class="divide-y divide-slate-200">
+        <!-- JSで描画 -->
+      </div>
+    </div>
+
+    <!-- 先生（指導者）名簿管理 -->
+    <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-3.5 sm:p-4 space-y-3">
+      <div class="border-b border-slate-100 pb-2">
+        <h2 class="font-bold text-base text-slate-900">先生（指導者・高校生以上）名簿</h2>
+        <p class="text-xs text-slate-500">入力順がPDFの左側（名字＋先生）に反映されます。親兼先生もここに登録しておくと選択できます。</p>
+      </div>
+      <div class="flex flex-wrap gap-2">
+        <input type="text" id="newTeacherName" placeholder="先生氏名（例：佐藤 健一）" class="flex-1 min-w-[160px] border border-slate-300 rounded-xl px-3 py-2.5 text-sm font-bold bg-slate-50">
+        <select id="newTeacherSex" class="border border-slate-300 rounded-xl px-3 py-2.5 text-sm font-bold bg-slate-50">
+          <option value="男">男</option>
+          <option value="女">女</option>
+        </select>
+        <button type="button" id="addTeacherBtn" class="bg-slate-800 hover:bg-slate-900 text-white text-sm font-bold px-4 py-2.5 rounded-xl">
+          追加
+        </button>
+      </div>
+      <div id="masterTeacherList" class="divide-y divide-slate-200">
+        <!-- JSで描画 -->
+      </div>
+    </div>
+
+    <!-- 使用体育館登録（名簿の下部に配置） -->
+    <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-3.5 sm:p-4 space-y-3">
+      <div class="border-b border-slate-100 pb-2">
+        <h2 class="font-bold text-base text-slate-900">使用体育館・会場登録</h2>
+        <p class="text-xs text-slate-500">ここで登録した会場が「出欠入力」のプルダウンとPDFタイトルに表示されます</p>
+      </div>
+      <div class="flex gap-2">
+        <input type="text" id="newGymName" placeholder="例：〇〇小学校体育館" class="flex-1 border border-slate-300 rounded-xl px-3 py-2.5 text-sm font-bold bg-slate-50">
+        <button type="button" id="addGymBtn" class="bg-slate-800 hover:bg-slate-900 text-white text-sm font-bold px-4 py-2.5 rounded-xl">
+          追加
+        </button>
+      </div>
+      <div id="masterGymList" class="flex flex-wrap gap-2">
+        <!-- JSで描画 -->
+      </div>
+    </div>
+
+    <!-- LINE共有用バックアップ（コピー＆貼り付け） -->
+    <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-3.5 sm:p-4 space-y-3">
+      <div class="border-b border-slate-100 pb-2">
+        <h2 class="font-bold text-base text-slate-900">名簿・履歴の共有（LINEコピー＆貼り付け）</h2>
+        <p class="text-xs text-slate-500">当番交代時などに、下のコードをコピーしてLINEで送り、別のスマホで貼り付けて引き継げます</p>
+      </div>
+      <textarea id="shareCodeBox" rows="3" placeholder="ここに共有コードを貼り付けて「読み込む」を押してください" class="w-full border border-slate-300 rounded-xl p-2.5 text-xs bg-slate-50"></textarea>
+      <div class="grid grid-cols-2 gap-2">
+        <button type="button" id="copyShareBtn" class="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs sm:text-sm py-2.5 rounded-xl">
+          データをコピー
+        </button>
+        <button type="button" id="importShareBtn" class="bg-slate-800 hover:bg-slate-900 text-white font-bold text-xs sm:text-sm py-2.5 rounded-xl">
+          貼り付けたデータを読み込む
+        </button>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<script>
+(function() {
+  'use strict';
+
+  // =========================================================
+  // 定数・学年定義・誕生日年齢マッピング
+  // =========================================================
+  const STORAGE_KEY = 'kendo_keiko_app_v1';
+  const GRADES = ['中3', '中2', '中1', '小6', '小5', '小4', '小3', '小2', '小1', '年長', '年中', '年少'];
+  const GRADE_AGES = {
+    '中3': 15, '中2': 14, '中1': 13,
+    '小6': 12, '小5': 11, '小4': 10, '小3': 9, '小2': 8, '小1': 7,
+    '年長': 6, '年中': 5, '年少': 4
+  };
+  const WEEKDAYS = ['日', '月', '火', '水', '木', '金', '土'];
+
+  const $ = id => document.getElementById(id);
+  const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+  const esc = s => String(s || '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+  // トースト通知（alert代替）
+  let toastTimer = null;
+  function showToast(msg) {
+    const el = $('toast');
+    el.textContent = msg;
+    el.classList.remove('hidden');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => el.classList.add('hidden'), 3200);
+  }
+
+  // 今日の日付（YYYY-MM-DD）
+  function todayStr() {
+    const d = new Date();
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  }
+
+  // 年度判定（4月1日〜翌年3月31日）
+  function getFiscalYear(dateStr) {
+    if (!dateStr) return new Date().getFullYear();
+    const [y, m] = dateStr.split('-').map(Number);
+    return m >= 4 ? y : y - 1;
+  }
+
+  // 和暦変換（例：令和8年11月21日）
+  function toWareki(dateStr) {
+    if (!dateStr) return '';
+    const [y, m, d] = dateStr.split('-').map(Number);
+    const dt = new Date(y, m - 1, d);
+    // 令和: 2019年5月1日〜
+    if (dt >= new Date(2019, 4, 1)) {
+      const ry = y - 2018;
+      return `令和${ry === 1 ? '元' : ry}年${m}月${d}日`;
+    }
+    return `${y}年${m}月${d}日`;
+  }
+
+  // 名字抽出（PDFの先生表示用）
+  function extractSurname(fullName) {
+    const clean = String(fullName || '').trim().replace(/先生$/, '');
+    if (!clean) return '';
+    const parts = clean.split(/[\s　]+/);
+    if (parts.length >= 2) return parts[0];
+    // スペースなしの場合は先頭2文字（1文字姓などの場合はフルまたは2文字）
+    return clean.length >= 3 ? clean.slice(0, 2) : clean;
+  }
+
+  // 学年から集計カテゴリ（中学生・小学生・幼児）を取得
+  function gradeCategory(grade) {
+    if (['中3', '中2', '中1'].includes(grade)) return 'jhs';
+    if (['小6', '小5', '小4', '小3', '小2', '小1'].includes(grade)) return 'elem';
+    return 'kinder';
+  }
+
+  // =========================================================
+  // アプリ状態管理
+  // =========================================================
+  let state = {
+    students: [],
+    teachers: [],
+    gyms: ['第一小学校 体育館', '市民武道館'],
+    history: [],
+    current: null
+  };
+
+  function createEmptyCurrent(studentsList, teachersList, gymsList) {
+    const stAtt = {};
+    (studentsList || []).forEach(s => {
+      stAtt[s.id] = {
+        present: s.status !== 'withdrawn', // デフォルト出席ON（退会済はOFF）
+        excused: false,                    // 公欠（独立）
+        father: false,
+        mother: false,
+        otherM: false,
+        otherF: false,
+        asTeacher: false,
+        linkedTeacherId: ''
+      };
+    });
+    const tcAtt = {};
+    (teachersList || []).forEach(t => {
+      tcAtt[t.id] = false;
+    });
+    return {
+      editingId: null, // nullなら新規、IDが入っていれば過去履歴の編集
+      date: todayStr(),
+      startHour: '18',
+      startMin: '00',
+      endHour: '20',
+      endMin: '00',
+      gym: (gymsList && gymsList[0]) || '',
+      studentAtt: stAtt,
+      teacherAtt: tcAtt,
+      visitors: [],      // { id, org, cat: 'jhs'|'elem'|'kinder', sex: '男'|'女', name, unknown: bool }
+      visitorAdultM: 0,
+      visitorAdultF: 0,
+      dutyIds: []        // 掃除当番（最大3名の生徒ID）
+    };
+  }
+
+  // 初期サンプルデータ（初回起動時のみ）
+  function seedInitialData() {
+    const s1 = uid(), s2 = uid(), s3 = uid(), s4 = uid(), s5 = uid();
+    const t1 = uid(), t2 = uid();
+    state.students = [
+      { id: s1, name: '佐藤 健太', sex: '男', grade: '中2', age: '14', rank: '二段', joinDate: '2021-04-10', status: 'active' },
+      { id: s2, name: '鈴木 結衣', sex: '女', grade: '小6', age: '12', rank: '1級', joinDate: '2022-05-01', status: 'active' },
+      { id: s3, name: '高橋 翔太', sex: '男', grade: '小4', age: '10', rank: '4級', joinDate: '2023-06-15', status: 'active' },
+      { id: s4, name: '田中 陽菜', sex: '女', grade: '年長', age: '6', rank: '無級', joinDate: '', status: 'trial' },
+      { id: s5, name: '伊藤 蓮', sex: '男', grade: '小3', age: '9', rank: '6級', joinDate: '2023-04-01', status: 'withdrawn' }
+    ];
+    state.teachers = [
+      { id: t1, name: '山本 義雄', sex: '男' },
+      { id: t2, name: '佐藤 誠', sex: '男' }
+    ];
+    state.gyms = ['〇〇小学校 体育館', '市民体育館 剣道場'];
+    state.history = [];
+    state.current = createEmptyCurrent(state.students, state.teachers, state.gyms);
+  }
+
+  function loadState() {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        state.students = Array.isArray(parsed.students) ? parsed.students : [];
+        state.teachers = Array.isArray(parsed.teachers) ? parsed.teachers : [];
+        state.gyms = Array.isArray(parsed.gyms) && parsed.gyms.length ? parsed.gyms : ['体育館'];
+        state.history = Array.isArray(parsed.history) ? parsed.history : [];
+        state.current = parsed.current || createEmptyCurrent(state.students, state.teachers, state.gyms);
+        syncCurrentWithMaster();
+        return;
+      }
+    } catch (e) {}
+    seedInitialData();
+    saveState();
+  }
+
+  function saveState() {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    } catch (e) {}
+  }
+
+  // 名簿の追加・削除があった場合にcurrentのマップを整合させる
+  function syncCurrentWithMaster() {
+    const cur = state.current;
+    if (!cur.studentAtt) cur.studentAtt = {};
+    if (!cur.teacherAtt) cur.teacherAtt = {};
+    state.students.forEach(s => {
+      if (!cur.studentAtt[s.id]) {
+        cur.studentAtt[s.id] = {
+          present: s.status !== 'withdrawn',
+          excused: false,
+          father: false,
+          mother: false,
+          otherM: false,
+          otherF: false,
+          asTeacher: false,
+          linkedTeacherId: ''
+        };
+      }
+    });
+    state.teachers.forEach(t => {
+      if (cur.teacherAtt[t.id] === undefined) {
+        cur.teacherAtt[t.id] = false;
+      }
+    });
+    if (!cur.gym && state.gyms.length) {
+      cur.gym = state.gyms[0];
+    }
+  }
+
+  // =========================================================
+  // 集計ロジック（入館人数・二重カウント防止）
+  // =========================================================
+  function computeStats(session) {
+    const counts = {
+      adult: { m: 0, f: 0, total: 0 },
+      jhs: { m: 0, f: 0, total: 0 },
+      elem: { m: 0, f: 0, total: 0 },
+      kinder: { m: 0, f: 0, total: 0 },
+      grandTotal: 0
+    };
+
+    let studentPresentCount = 0;
+    let studentExcusedCount = 0;
+    let studentAbsentCount = 0;
+    let parentEscortM = 0;
+    let parentEscortF = 0;
+    let teacherPresentIds = new Set();
+    let extraParentTeachers = []; // 先生名簿にない親兼先生用
+
+    // 1. 生徒行の集計（在籍＋入会検討中。退会済でも当日出席チェックがあればカウント）
+    state.students.forEach(s => {
+      const a = session.studentAtt[s.id];
+      if (!a) return;
+
+      if (a.present) {
+        const cat = gradeCategory(s.grade);
+        if (s.sex === '男') counts[cat].m++;
+        else counts[cat].f++;
+        studentPresentCount++;
+      } else if (a.excused) {
+        studentExcusedCount++;
+      } else if (s.status !== 'withdrawn') {
+        studentAbsentCount++;
+      }
+
+      // 付き添い家族
+      if (a.father) { counts.adult.m++; parentEscortM++; }
+      if (a.mother) { counts.adult.f++; parentEscortF++; }
+      if (a.otherM) { counts.adult.m++; parentEscortM++; }
+      if (a.otherF) { counts.adult.f++; parentEscortF++; }
+
+      // 先生として出席（親兼先生）
+      if (a.asTeacher) {
+        const surname = extractSurname(s.name);
+        // 同じ名字の先生が先生名簿にあれば紐づけて二重カウントを防ぐ
+        const matchedTeacher = state.teachers.find(t => extractSurname(t.name) === surname);
+        if (matchedTeacher) {
+          teacherPresentIds.add(matchedTeacher.id);
+        } else {
+          // 先生名簿未登録の親兼先生の場合
+          const key = surname + '_' + s.id;
+          if (!extraParentTeachers.some(x => x.surname === surname)) {
+            extraParentTeachers.push({ surname, sex: a.father ? '男' : (a.mother ? '女' : '男') });
+          }
+        }
+      }
+    });
+
+    // 2. 先生名簿からの出席合算（Setで重複排除）
+    state.teachers.forEach(t => {
+      if (session.teacherAtt[t.id]) {
+        teacherPresentIds.add(t.id);
+      }
+    });
+
+    let clubTeacherM = 0;
+    let clubTeacherF = 0;
+    const attendingTeachersOrdered = [];
+
+    // 先生名簿の入力順に出席先生を並べる（PDF左側用）
+    state.teachers.forEach(t => {
+      if (teacherPresentIds.has(t.id)) {
+        if (t.sex === '男') { counts.adult.m++; clubTeacherM++; }
+        else { counts.adult.f++; clubTeacherF++; }
+        attendingTeachersOrdered.push({
+          id: t.id,
+          name: t.name,
+          surname: extractSurname(t.name)
+        });
+      }
+    });
+
+    // 先生名簿未登録の親兼先生も合算
+    extraParentTeachers.forEach(pt => {
+      if (pt.sex === '男') { counts.adult.m++; clubTeacherM++; }
+      else { counts.adult.f++; clubTeacherF++; }
+      attendingTeachersOrdered.push({
+        id: 'pt_' + pt.surname,
+        name: pt.surname,
+        surname: pt.surname
+      });
+    });
+
+    // 3. 出稽古の生徒
+    let visitorStudentCount = 0;
+    (session.visitors || []).forEach(v => {
+      const cat = v.cat || 'elem';
+      if (v.sex === '男') counts[cat].m++;
+      else counts[cat].f++;
+      visitorStudentCount++;
+    });
+
+    // 4. 出稽古の大人
+    const vAdultM = Number(session.visitorAdultM) || 0;
+    const vAdultF = Number(session.visitorAdultF) || 0;
+    counts.adult.m += vAdultM;
+    counts.adult.f += vAdultF;
+
+    // 合計計算
+    ['adult', 'jhs', 'elem', 'kinder'].forEach(k => {
+      counts[k].total = counts[k].m + counts[k].f;
+      counts.grandTotal += counts[k].total;
+    });
+
+    return {
+      counts,
+      studentPresentCount,
+      studentExcusedCount,
+      studentAbsentCount,
+      parentEscortM,
+      parentEscortF,
+      clubTeacherM,
+      clubTeacherF,
+      vAdultM,
+      vAdultF,
+      visitorStudentCount,
+      attendingTeachersOrdered
+    };
+  }
+
+  // =========================================================
+  // 掃除当番累計回数 ＆ 年度皆勤賞集計
+  // =========================================================
+  function getStudentDutyCounts(excludeHistoryId = null) {
+    const map = {};
+    state.students.forEach(s => { map[s.id] = 0; });
+    state.history.forEach(h => {
+      if (excludeHistoryId && h.id === excludeHistoryId) return;
+      (h.dutyIds || []).forEach(sid => {
+        if (map[sid] !== undefined) map[sid]++;
+      });
+    });
+    return map;
+  }
+
+  function getFiscalYearAttendance(fiscalYear) {
+    const sessions = state.history.filter(h => getFiscalYear(h.date) === fiscalYear);
+    const stats = {};
+    state.students.forEach(s => {
+      stats[s.id] = { present: 0, excused: 0, absent: 0, totalSessions: 0, isPerfect: false };
+    });
+
+    sessions.forEach(h => {
+      state.students.forEach(s => {
+        // 入会日より前の稽古は除外
+        if (s.joinDate && h.date < s.joinDate) return;
+        // 退会済で記録がない場合は除外
+        const a = h.studentAtt && h.studentAtt[s.id];
+        if (!a) return;
+        if (s.status === 'withdrawn' && !a.present && !a.excused) return;
+
+        stats[s.id].totalSessions++;
+        if (a.present) stats[s.id].present++;
+        else if (a.excused) stats[s.id].excused++;
+        else stats[s.id].absent++;
+      });
+    });
+
+    state.students.forEach(s => {
+      const st = stats[s.id];
+      // 1回以上対象稽古があり、通常の欠席が0回（すべて出席または公欠）なら皆勤賞
+      st.isPerfect = st.totalSessions > 0 && st.absent === 0 && s.status === 'active';
+    });
+
+    return { sessionsCount: sessions.length, stats };
+  }
+
+  // =========================================================
+  // ランダムかつ均等な掃除当番（3人）選出ロジック
+  // =========================================================
+  function pickRandomEqualDuty() {
+    const cur = state.current;
+    // 当日「出席」している生徒のみ対象（公欠・欠席は除外）
+    const eligible = state.students.filter(s => cur.studentAtt[s.id] && cur.studentAtt[s.id].present);
+    if (eligible.length === 0) {
+      showToast('出席している生徒がいないため選出できません');
+      return;
+    }
+
+    const dutyCounts = getStudentDutyCounts(cur.editingId);
+    // 累計回数ごとにバケット分けして、各バケット内をシャッフル（名簿順にしない）
+    const buckets = {};
+    eligible.forEach(s => {
+      const c = dutyCounts[s.id] || 0;
+      if (!buckets[c]) buckets[c] = [];
+      buckets[c].push(s.id);
+    });
+
+    const sortedCounts = Object.keys(buckets).map(Number).sort((a, b) => a - b);
+    const pool = [];
+    sortedCounts.forEach(c => {
+      const arr = buckets[c];
+      // Fisher-Yates シャッフル
+      for (let i = arr.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [arr[i], arr[j]] = [arr[j], arr[i]];
+      }
+      pool.push(...arr);
+    });
+
+    cur.dutyIds = pool.slice(0, 3);
+    saveState();
+    renderSummaryTab();
+    showToast('累計回数が少ない生徒からランダムに3名選出しました');
+  }
+
+  // =========================================================
+  // UI初期化：時刻プルダウン（24時間表記・10分刻み）
+  // =========================================================
+  function initTimeSelectors() {
+    const hours = Array.from({ length: 24 }, (_, i) => String(i).padStart(2, '0'));
+    const mins = ['00', '10', '20', '30', '40', '50'];
+
+    ['startHour', 'endHour'].forEach(id => {
+      $(id).innerHTML = hours.map(h => `<option value="${h}">${h}時</option>`).join('');
+    });
+    ['startMin', 'endMin'].forEach(id => {
+      $(id).innerHTML = mins.map(m => `<option value="${m}">${m}分</option>`).join('');
+    });
+  }
+
+  function updateWeekdayLabel(dateStr) {
+    if (!dateStr) {
+      $('attWeekday').textContent = '(-)';
+      return;
+    }
+    const [y, m, d] = dateStr.split('-').map(Number);
+    const dt = new Date(y, m - 1, d);
+    $('attWeekday').textContent = `(${WEEKDAYS[dt.getDay()]})`;
+  }
+
+  // =========================================================
+  // タブ切り替え
+  // =========================================================
+  let activeTab = 'att';
+  function switchTab(tab) {
+    activeTab = tab;
+    ['att', 'sum', 'his', 'mas'].forEach(t => {
+      $('tab-' + t).classList.toggle('hidden', t !== tab);
+      const btn = document.querySelector(`.tab-btn[data-tab="${t}"]`);
+      if (t === tab) {
+        btn.classList.add('border-amber-400', 'text-amber-300', 'bg-slate-900/60');
+        btn.classList.remove('border-transparent', 'text-slate-300');
+      } else {
+        btn.classList.remove('border-amber-400', 'text-amber-300', 'bg-slate-900/60');
+        btn.classList.add('border-transparent', 'text-slate-300');
+      }
+    });
+
+    if (tab === 'att') renderAttendanceTab();
+    if (tab === 'sum') renderSummaryTab();
+    if (tab === 'his') renderHistoryTab();
+    if (tab === 'mas') renderMasterTab();
+    window.scrollTo(0, 0);
+  }
+
+  // =========================================================
+  // 描画：タブ1「出欠入力」
+  // =========================================================
+  function renderAttendanceTab() {
+    const cur = state.current;
+    const isEditing = Boolean(cur.editingId);
+
+    $('editBadge').classList.toggle('hidden', !isEditing);
+    $('editBanner').classList.toggle('hidden', !isEditing);
+    if (isEditing) {
+      $('editBannerText').textContent = `${cur.date}（${cur.gym || '会場未設定'}）の記録を編集中です`;
+    }
+
+    $('attDate').value = cur.date;
+    updateWeekdayLabel(cur.date);
+
+    // 体育館プルダウン
+    const gymOpts = state.gyms.map(g => `<option value="${esc(g)}">${esc(g)}</option>`).join('');
+    $('attGym').innerHTML = gymOpts || '<option value="">（名簿タブで体育館を登録）</option>';
+    if (cur.gym && state.gyms.includes(cur.gym)) {
+      $('attGym').value = cur.gym;
+    } else if (state.gyms.length) {
+      cur.gym = state.gyms[0];
+      $('attGym').value = cur.gym;
+    }
+
+    $('startHour').value = cur.startHour;
+    $('startMin').value = cur.startMin;
+    $('endHour').value = cur.endHour;
+    $('endMin').value = cur.endMin;
+
+    // 生徒一覧描画（在籍・検討中・退会済）
+    if (state.students.length === 0) {
+      $('studentAttList').innerHTML = '<div class="py-6 text-center text-sm text-slate-400">「④ 名簿・会場」タブから生徒を登録してください</div>';
+    } else {
+      $('studentAttList').innerHTML = state.students.map(s => {
+        const a = cur.studentAtt[s.id] || {};
+        const isTrial = s.status === 'trial';
+        const isWithdrawn = s.status === 'withdrawn';
+
+        // バッジ（検討＝四角い黄色枠、退会＝四角い赤枠）
+        let badgeHtml = '';
+        if (isTrial) {
+          badgeHtml = '<span class="inline-block px-1.5 py-0.5 text-xs font-black bg-amber-100 border-2 border-amber-500 text-amber-950 rounded mr-1.5">検討</span>';
+        } else if (isWithdrawn) {
+          badgeHtml = '<span class="inline-block px-1.5 py-0.5 text-xs font-black bg-red-100 border-2 border-red-500 text-red-800 rounded mr-1.5">退会</span>';
+        }
+
+        // 退会済は名前のフォント色を暗く（薄く）表示
+        const nameColorClass = isWithdrawn ? 'text-slate-400' : 'text-slate-900';
+
+        // 欠席状態ラベル
+        let statusTag = '';
+        if (a.present) {
+          statusTag = '<span class="text-[11px] font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded">出席</span>';
+        } else if (a.excused) {
+          statusTag = '<span class="text-[11px] font-bold text-amber-800 bg-amber-100 px-2 py-0.5 rounded">公欠（皆勤対象）</span>';
+        } else {
+          statusTag = '<span class="text-[11px] font-bold text-red-700 bg-red-50 px-2 py-0.5 rounded">欠席</span>';
+        }
+
+        return `
+          <div class="py-3 space-y-2 ${isWithdrawn ? 'bg-slate-50/70' : ''}">
+            <div class="flex items-center justify-between gap-2">
+              <div class="flex items-center flex-wrap gap-y-1">
+                ${badgeHtml}
+                <span class="font-bold text-base ${nameColorClass}">${esc(s.name)}</span>
+                <span class="ml-2 text-xs font-bold text-slate-500">${esc(s.grade)} / ${esc(s.sex)}</span>
+              </div>
+              <div>${statusTag}</div>
+            </div>
+
+            <!-- 横並びチェックボックス群 -->
+            <div class="flex flex-wrap gap-1.5">
+              <label class="chk-pill inline-flex items-center gap-1.5 px-2.5 py-2 rounded-xl border text-xs sm:text-sm cursor-pointer select-none ${a.present ? 'bg-blue-600 border-blue-700 text-white' : 'bg-white border-slate-300 text-slate-700'}">
+                <input type="checkbox" data-sid="${s.id}" data-field="present" ${a.present ? 'checked' : ''} class="w-4 h-4 accent-blue-600">
+                <span>出席</span>
+              </label>
+
+              <label class="chk-pill inline-flex items-center gap-1.5 px-2.5 py-2 rounded-xl border text-xs sm:text-sm cursor-pointer select-none ${a.excused ? 'bg-amber-500 border-amber-600 text-slate-950' : 'bg-white border-slate-300 text-slate-700'}">
+                <input type="checkbox" data-sid="${s.id}" data-field="excused" ${a.excused ? 'checked' : ''} class="w-4 h-4 accent-amber-500">
+                <span>公欠</span>
+              </label>
+
+              <label class="chk-pill inline-flex items-center gap-1.5 px-2.5 py-2 rounded-xl border text-xs sm:text-sm cursor-pointer select-none ${a.father ? 'bg-sky-100 border-sky-500 text-sky-950' : 'bg-white border-slate-300 text-slate-700'}">
+                <input type="checkbox" data-sid="${s.id}" data-field="father" ${a.father ? 'checked' : ''} class="w-4 h-4 accent-sky-600">
+                <span>父親</span>
+              </label>
+
+              <label class="chk-pill inline-flex items-center gap-1.5 px-2.5 py-2 rounded-xl border text-xs sm:text-sm cursor-pointer select-none ${a.mother ? 'bg-rose-100 border-rose-500 text-rose-950' : 'bg-white border-slate-300 text-slate-700'}">
+                <input type="checkbox" data-sid="${s.id}" data-field="mother" ${a.mother ? 'checked' : ''} class="w-4 h-4 accent-rose-600">
+                <span>母親</span>
+              </label>
+
+              <label class="chk-pill inline-flex items-center gap-1.5 px-2.5 py-2 rounded-xl border text-xs sm:text-sm cursor-pointer select-none ${a.otherM ? 'bg-slate-200 border-slate-500 text-slate-900' : 'bg-white border-slate-300 text-slate-700'}">
+                <input type="checkbox" data-sid="${s.id}" data-field="otherM" ${a.otherM ? 'checked' : ''} class="w-4 h-4">
+                <span>その他の男</span>
+              </label>
+
+              <label class="chk-pill inline-flex items-center gap-1.5 px-2.5 py-2 rounded-xl border text-xs sm:text-sm cursor-pointer select-none ${a.otherF ? 'bg-slate-200 border-slate-500 text-slate-900' : 'bg-white border-slate-300 text-slate-700'}">
+                <input type="checkbox" data-sid="${s.id}" data-field="otherF" ${a.otherF ? 'checked' : ''} class="w-4 h-4">
+                <span>その他の女</span>
+              </label>
+
+              <label class="chk-pill inline-flex items-center gap-1.5 px-2.5 py-2 rounded-xl border text-xs sm:text-sm cursor-pointer select-none ${a.asTeacher ? 'bg-purple-700 border-purple-800 text-white' : 'bg-white border-slate-300 text-slate-700'}">
+                <input type="checkbox" data-sid="${s.id}" data-field="asTeacher" ${a.asTeacher ? 'checked' : ''} class="w-4 h-4 accent-purple-600">
+                <span>先生として出席</span>
+              </label>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    // 先生（指導者）一覧描画
+    // 生徒行で「先生として出席」にチェックが入った先生を自動判定
+    const linkedTeacherIds = new Set();
+    state.students.forEach(s => {
+      const a = cur.studentAtt[s.id];
+      if (a && a.asTeacher) {
+        const sn = extractSurname(s.name);
+        const mt = state.teachers.find(t => extractSurname(t.name) === sn);
+        if (mt) linkedTeacherIds.add(mt.id);
+      }
+    });
+
+    if (state.teachers.length === 0) {
+      $('teacherAttList').innerHTML = '<div class="col-span-full py-3 text-center text-xs text-slate-400">「④ 名簿・会場」タブから先生を登録できます</div>';
+    } else {
+      $('teacherAttList').innerHTML = state.teachers.map(t => {
+        const isLinked = linkedTeacherIds.has(t.id);
+        const checked = Boolean(cur.teacherAtt[t.id]) || isLinked;
+        return `
+          <label class="flex items-center justify-between gap-2 p-2.5 rounded-xl border cursor-pointer ${checked ? 'bg-purple-50 border-purple-400' : 'bg-white border-slate-200'}">
+            <div class="flex items-center gap-2">
+              <input type="checkbox" data-tid="${t.id}" ${checked ? 'checked' : ''} ${isLinked ? 'disabled' : ''} class="w-5 h-5 accent-purple-700">
+              <span class="font-bold text-sm text-slate-900">${esc(t.name)}</span>
+              <span class="text-xs text-slate-500">(${esc(t.sex)})</span>
+            </div>
+            ${isLinked ? '<span class="text-[11px] font-bold text-purple-800 bg-purple-100 px-2 py-0.5 rounded">親兼先生で連動中</span>' : ''}
+          </label>
+        `;
+      }).join('');
+    }
+
+    // 出稽古生徒一覧描画
+    if (!cur.visitors || cur.visitors.length === 0) {
+      $('visitorStudentList').innerHTML = '<div class="text-xs text-slate-400 py-1">出稽古の生徒がいる場合は「＋ 生徒を追加」を押してください</div>';
+    } else {
+      $('visitorStudentList').innerHTML = cur.visitors.map((v, idx) => `
+        <div class="bg-emerald-50/60 border border-emerald-200 rounded-xl p-2.5 space-y-2">
+          <div class="flex items-center justify-between gap-2">
+            <span class="text-xs font-bold text-emerald-900">出稽古生徒 #${idx + 1}</span>
+            <button type="button" data-del-visitor="${v.id}" class="text-xs font-bold text-red-600 bg-white border border-red-200 px-2 py-1 rounded-lg">削除</button>
+          </div>
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            <input type="text" data-vid="${v.id}" data-vfield="org" value="${esc(v.org)}" placeholder="所属道場・学校名" class="border border-slate-300 rounded-lg px-2.5 py-2 text-sm font-bold bg-white">
+            <div class="grid grid-cols-2 gap-1.5">
+              <select data-vid="${v.id}" data-vfield="cat" class="border border-slate-300 rounded-lg px-2 py-2 text-sm font-bold bg-white">
+                <option value="jhs" ${v.cat === 'jhs' ? 'selected' : ''}>中学生</option>
+                <option value="elem" ${v.cat === 'elem' ? 'selected' : ''}>小学生</option>
+                <option value="kinder" ${v.cat === 'kinder' ? 'selected' : ''}>幼児</option>
+              </select>
+              <select data-vid="${v.id}" data-vfield="sex" class="border border-slate-300 rounded-lg px-2 py-2 text-sm font-bold bg-white">
+                <option value="男" ${v.sex === '男' ? 'selected' : ''}>男</option>
+                <option value="女" ${v.sex === '女' ? 'selected' : ''}>女</option>
+              </select>
+            </div>
+          </div>
+          <div class="flex items-center gap-2">
+            <input type="text" data-vid="${v.id}" data-vfield="name" value="${esc(v.unknown ? '' : v.name)}" ${v.unknown ? 'disabled' : ''} placeholder="${v.unknown ? '名前不明' : '名前（タレの名前など）'}" class="flex-1 border border-slate-300 rounded-lg px-2.5 py-2 text-sm font-bold bg-white disabled:bg-slate-100 disabled:text-slate-400">
+            <label class="inline-flex items-center gap-1.5 bg-white border border-slate-300 px-3 py-2 rounded-lg text-xs font-bold cursor-pointer">
+              <input type="checkbox" data-vid="${v.id}" data-vfield="unknown" ${v.unknown ? 'checked' : ''} class="w-4 h-4">
+              <span>不明</span>
+            </label>
+          </div>
+        </div>
+      `).join('');
+    }
+
+    $('visitorAdultM').textContent = cur.visitorAdultM || 0;
+    $('visitorAdultF').textContent = cur.visitorAdultF || 0;
+
+    updateLiveTotalBadge();
+  }
+
+  function updateLiveTotalBadge() {
+    const st = computeStats(state.current);
+    $('liveTotalBadge').textContent = `現在の入館総数：${st.counts.grandTotal}名`;
+  }
+
+  // =========================================================
+  // 描画：タブ2「集計・PDF」
+  // =========================================================
+  function renderSummaryTab() {
+    const cur = state.current;
+    const stats = computeStats(cur);
+    const c = stats.counts;
+    const dutyCounts = getStudentDutyCounts(cur.editingId);
+
+    // 1. 本日の掃除当番（3人）スロット描画
+    const presentStudents = state.students.filter(s => cur.studentAtt[s.id] && cur.studentAtt[s.id].present);
+    const slots = [0, 1, 2].map(idx => {
+      const selectedId = cur.dutyIds[idx] || '';
+      const opts = '<option value="">（未選択）</option>' + presentStudents.map(s => {
+        const cnt = dutyCounts[s.id] || 0;
+        return `<option value="${s.id}" ${s.id === selectedId ? 'selected' : ''}>${esc(s.name)}（${s.grade}・累計${cnt}回）</option>`;
+      }).join('');
+      return `
+        <div class="bg-amber-50/70 border border-amber-200 rounded-xl p-2.5">
+          <div class="text-xs font-bold text-amber-900 mb-1">掃除当番 ${idx + 1}人目</div>
+          <select data-duty-slot="${idx}" class="w-full border border-amber-300 rounded-lg px-2 py-2 text-xs sm:text-sm font-bold bg-white">
+            ${opts}
+          </select>
+        </div>
+      `;
+    }).join('');
+    $('dutySlots').innerHTML = slots;
+
+    // 2. 横に見れる集計表
+    const [y, m, d] = cur.date.split('-').map(Number);
+    const wd = WEEKDAYS[new Date(y, m - 1, d).getDay()];
+    $('sumHeaderMeta').textContent = `${cur.date}(${wd}) ${cur.startHour}:${cur.startMin}〜${cur.endHour}:${cur.endMin} / ${cur.gym}`;
+
+    $('summaryTableBody').innerHTML = `
+      <tr>
+        <td class="p-2.5 border-r border-slate-200 text-blue-800">${c.adult.m}</td>
+        <td class="p-2.5 border-r border-slate-200 text-rose-700">${c.adult.f}</td>
+        <td class="p-2.5 border-r border-slate-300 bg-slate-100">${c.adult.total}</td>
+        <td class="p-2.5 border-r border-slate-200 text-blue-800">${c.jhs.m}</td>
+        <td class="p-2.5 border-r border-slate-200 text-rose-700">${c.jhs.f}</td>
+        <td class="p-2.5 border-r border-slate-300 bg-slate-100">${c.jhs.total}</td>
+        <td class="p-2.5 border-r border-slate-200 text-blue-800">${c.elem.m}</td>
+        <td class="p-2.5 border-r border-slate-200 text-rose-700">${c.elem.f}</td>
+        <td class="p-2.5 border-r border-slate-300 bg-slate-100">${c.elem.total}</td>
+        <td class="p-2.5 border-r border-slate-200 text-blue-800">${c.kinder.m}</td>
+        <td class="p-2.5 border-r border-slate-200 text-rose-700">${c.kinder.f}</td>
+        <td class="p-2.5 border-r border-slate-300 bg-slate-100">${c.kinder.total}</td>
+        <td class="p-2.5 bg-amber-100 text-slate-950 text-lg font-black">${c.grandTotal}名</td>
+      </tr>
+    `;
+
+    $('summaryBreakdownText').innerHTML = `
+      <div><strong>内訳詳細：</strong>先生（男${stats.clubTeacherM}・女${stats.clubTeacherF}）＋ 保護者付き添い（男${stats.parentEscortM}・女${stats.parentEscortF}）＋ 出稽古大人（男${stats.vAdultM}・女${stats.vAdultF}）</div>
+      <div class="mt-1"><strong>生徒状況：</strong>出席 ${stats.studentPresentCount}名 / 公欠 ${stats.studentExcusedCount}名 / 欠席 ${stats.studentAbsentCount}名 / 出稽古生徒 ${stats.visitorStudentCount}名</div>
+    `;
+
+    // 3. 確定ボタンの表示切り替え（新規：「集計完了」／過去編集中：「更新」）
+    if (cur.editingId) {
+      $('completeBtnText').textContent = '更新';
+      $('completeBtn').classList.remove('bg-blue-700', 'hover:bg-blue-800');
+      $('completeBtn').classList.add('bg-amber-600', 'hover:bg-amber-700');
+    } else {
+      $('completeBtnText').textContent = '集計完了';
+      $('completeBtn').classList.remove('bg-amber-600', 'hover:bg-amber-700');
+      $('completeBtn').classList.add('bg-blue-700', 'hover:bg-blue-800');
+    }
+  }
+
+  // =========================================================
+  // A4縦 PDF生成（ゴシック体統一・指定レイアウト・欠席赤字「欠」）
+  // =========================================================
+  async function generateKeikoPdf(session) {
+    try {
+      await document.fonts.load('bold 36px "Noto Sans JP"');
+    } catch (e) {}
+
+    const W = 1240;
+    const H = 1754; // A4縦 150dpi相当
+    const FONT = '"Noto Sans JP", "Hiragino Sans", "Yu Gothic", sans-serif';
+    const canvas = document.createElement('canvas');
+    canvas.width = W;
+    canvas.height = H;
+    const ctx = canvas.getContext('2d');
+
+    // 背景白
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, W, H);
+
+    const stats = computeStats(session);
+
+    // 1. タイトル：和暦の日付（例：令和8年11月21日）
+    const warekiTitle = toWareki(session.date);
+    ctx.fillStyle = '#0f172a';
+    ctx.font = 'bold 42px ' + FONT;
+    ctx.textAlign = 'center';
+    ctx.fillText(warekiTitle, W / 2, 110);
+
+    // サブ時刻情報（控えめに添える）
+    ctx.fillStyle = '#475569';
+    ctx.font = '24px ' + FONT;
+    ctx.fillText(`${session.startHour}:${session.startMin} 〜 ${session.endHour}:${session.endMin}　（入館総数：${stats.counts.grandTotal}名）`, W / 2, 152);
+
+    // 2. 2段落の行間をあけて、中央に少し大きなフォントサイズで「体育館の名前 稽古」
+    const gymTitle = `${session.gym || '体育館'} 稽古`;
+    ctx.fillStyle = '#0f172a';
+    ctx.font = 'bold 54px ' + FONT;
+    ctx.fillText(gymTitle, W / 2, 260, W - 140);
+
+    // 区切り線
+    ctx.strokeStyle = '#94a3b8';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(80, 295);
+    ctx.lineTo(W - 80, 295);
+    ctx.stroke();
+
+    // 3. 2列レイアウト（左側：先生一覧、右側：学年別生徒一覧）
+    const topY = 350;
+    const leftX = 110;
+    const rightX = 520;
+
+    // 中央の縦仕切り線
+    ctx.strokeStyle = '#cbd5e1';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(470, 320);
+    ctx.lineTo(470, H - 150);
+    ctx.stroke();
+
+    // --- 左側：上から先生達入力順に出席した方の名前だけ（名字に先生を付ける） ---
+    ctx.textAlign = 'left';
+    ctx.fillStyle = '#334155';
+    ctx.font = 'bold 28px ' + FONT;
+    ctx.fillText(`【指導者】 ${stats.attendingTeachersOrdered.length}名`, leftX, topY);
+
+    let ly = topY + 52;
+    ctx.fillStyle = '#0f172a';
+    ctx.font = 'bold 34px ' + FONT;
+    if (stats.attendingTeachersOrdered.length === 0) {
+      ctx.fillStyle = '#94a3b8';
+      ctx.font = '28px ' + FONT;
+      ctx.fillText('出席なし', leftX, ly);
+    } else {
+      stats.attendingTeachersOrdered.forEach(t => {
+        ctx.fillStyle = '#0f172a';
+        ctx.font = 'bold 34px ' + FONT;
+        ctx.fillText(`${t.surname}先生`, leftX + 10, ly, 330);
+        ly += 50;
+      });
+    }
+
+    // 左下部に掃除当番（3人）も記載しておくとペーパー運用に便利
+    const dutyNames = (session.dutyIds || [])
+      .map(id => state.students.find(s => s.id === id))
+      .filter(Boolean)
+      .map(s => s.name);
+    if (dutyNames.length > 0) {
+      const dutyY = Math.max(ly + 40, H - 310);
+      ctx.strokeStyle = '#cbd5e1';
+      ctx.strokeRect(leftX, dutyY - 34, 330, 50 + dutyNames.length * 40);
+      ctx.fillStyle = '#334155';
+      ctx.font = 'bold 24px ' + FONT;
+      ctx.fillText('【本日の掃除当番】', leftX + 14, dutyY);
+      dutyNames.forEach((dn, idx) => {
+        ctx.fillStyle = '#0f172a';
+        ctx.font = 'bold 26px ' + FONT;
+        ctx.fillText(`・${dn}`, leftX + 18, dutyY + 40 + idx * 38, 295);
+      });
+    }
+
+    // --- 右側：生徒たちの表示（学年の横に1つスペースを空けて人数、一段下にフルネーム、欠席のみ赤字で「欠」） ---
+    let ry = topY;
+    // 対象生徒（通常在籍＋入会検討中。退会済は当日出席があれば表示）
+    const targetStudents = state.students.filter(s => {
+      if (s.status !== 'withdrawn') return true;
+      const a = session.studentAtt[s.id];
+      return a && (a.present || a.excused);
+    });
+
+    // 学年ごとにグルーピング
+    const byGrade = {};
+    GRADES.forEach(g => { byGrade[g] = []; });
+    targetStudents.forEach(s => {
+      if (!byGrade[s.grade]) byGrade[s.grade] = [];
+      byGrade[s.grade].push(s);
+    });
+
+    // 学年ブロック数が多くても1ページに収まるよう行間を自動調整
+    const activeGrades = GRADES.filter(g => byGrade[g].length > 0);
+    const totalStudentLines = targetStudents.length;
+    const availHeight = H - topY - 170;
+    const estimatedNeeded = activeGrades.length * 48 + totalStudentLines * 42;
+    const scale = estimatedNeeded > availHeight ? Math.max(0.65, availHeight / estimatedNeeded) : 1;
+
+    const gradeHeaderStep = Math.round(44 * scale);
+    const studentLineStep = Math.round(42 * scale);
+    const gradeFontSize = Math.round(30 * scale);
+    const nameFontSize = Math.round(30 * scale);
+
+    activeGrades.forEach(g => {
+      const list = byGrade[g];
+      // 学年の出席人数（出席＋検討中出席）
+      const presentCnt = list.filter(s => {
+        const a = session.studentAtt[s.id];
+        return a && a.present;
+      }).length;
+
+      // 学年の横に1つスペースを空けて人数を表示
+      ctx.fillStyle = '#1e293b';
+      ctx.font = `bold ${gradeFontSize}px ` + FONT;
+      ctx.fillText(`${g} ${presentCnt}名`, rightX, ry);
+      ry += gradeHeaderStep;
+
+      // 一段下にフルネームを順番に上から下に表示
+      list.forEach(s => {
+        const a = session.studentAtt[s.id] || {};
+        const isPresent = Boolean(a.present);
+        const isExcused = Boolean(a.excused);
+        const isAbsent = !isPresent && !isExcused; // 通常の欠席
+
+        const labelName = s.status === 'trial' ? `${s.name}（検討）` : s.name;
+        ctx.fillStyle = '#0f172a';
+        ctx.font = `bold ${nameFontSize}px ` + FONT;
+        ctx.fillText(labelName, rightX + 28, ry, 480);
+
+        // 「欠席」の子だけを赤字で「欠」と表示（公欠は赤字の「欠」にしない）
+        if (isAbsent) {
+          const nameW = Math.min(ctx.measureText(labelName).width, 480);
+          const stampX = rightX + 28 + nameW + 24;
+          ctx.fillStyle = '#dc2626';
+          ctx.font = `bold ${nameFontSize}px ` + FONT;
+          ctx.fillText('欠', stampX, ry);
+          // ハンコ風の赤い丸枠
+          ctx.strokeStyle = '#dc2626';
+          ctx.lineWidth = 2.5;
+          ctx.beginPath();
+          ctx.arc(stampX + nameFontSize * 0.5, ry - nameFontSize * 0.35, nameFontSize * 0.65, 0, Math.PI * 2);
+          ctx.stroke();
+        } else if (isExcused) {
+          const nameW = Math.min(ctx.measureText(labelName).width, 480);
+          ctx.fillStyle = '#64748b';
+          ctx.font = `${Math.round(nameFontSize * 0.8)}px ` + FONT;
+          ctx.fillText('（公欠）', rightX + 28 + nameW + 16, ry);
+        }
+
+        ry += studentLineStep;
+      });
+      ry += Math.round(12 * scale);
+    });
+
+    // 出稽古生徒がいる場合も右下に追記
+    if (session.visitors && session.visitors.length > 0) {
+      ctx.fillStyle = '#1e293b';
+      ctx.font = `bold ${gradeFontSize}px ` + FONT;
+      ctx.fillText(`出稽古 ${session.visitors.length}名`, rightX, ry);
+      ry += gradeHeaderStep;
+      session.visitors.forEach(v => {
+        const vText = `${v.org ? v.org + ' ' : ''}${v.unknown ? '名前不明' : (v.name || '名前不明')}`;
+        ctx.fillStyle = '#0f172a';
+        ctx.font = `bold ${nameFontSize}px ` + FONT;
+        ctx.fillText(vText, rightX + 28, ry, 560);
+        ry += studentLineStep;
+      });
+    }
+
+    // 下部：横並び入館集計サマリー
+    const footY = H - 110;
+    ctx.strokeStyle = '#94a3b8';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(80, footY - 35);
+    ctx.lineTo(W - 80, footY - 35);
+    ctx.stroke();
+
+    const c = stats.counts;
+    ctx.fillStyle = '#0f172a';
+    ctx.font = 'bold 24px ' + FONT;
+    ctx.textAlign = 'center';
+    const summaryLine = `大人 ${c.adult.total}名（男${c.adult.m}・女${c.adult.f}） ／ 中学生 ${c.jhs.total}名（男${c.jhs.m}・女${c.jhs.f}） ／ 小学生 ${c.elem.total}名（男${c.elem.m}・女${c.elem.f}） ／ 幼児 ${c.kinder.total}名（男${c.kinder.m}・女${c.kinder.f}） ／ 総数 ${c.grandTotal}名`;
+    ctx.fillText(summaryLine, W / 2, footY + 5, W - 160);
+
+    const pdf = new window.jspdf.jsPDF({ unit: 'mm', format: 'a4' });
+    pdf.addImage(canvas.toDataURL('image/jpeg', 0.94), 'JPEG', 0, 0, 210, 297);
+    const blob = pdf.output('blob');
+    const filename = `keiko_${session.date}.pdf`;
+
+    try {
+      const file = new File([blob], filename, { type: 'application/pdf' });
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        await navigator.share({ files: [file] });
+        showToast('PDFを共有・保存しました');
+        return;
+      }
+    } catch (e) {
+      if (e && e.name === 'AbortError') return;
+    }
+
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    showToast(`PDF（${filename}）を作成しました`);
+  }
+
+  // =========================================================
+  // 描画：タブ3「過去の稽古」
+  // =========================================================
+  function renderHistoryTab() {
+    if (state.history.length === 0) {
+      $('historyList').innerHTML = '<div class="py-8 text-center text-sm text-slate-400">まだ確定した稽古記録がありません。「② 集計・PDF」の「集計完了」から保存できます。</div>';
+      return;
+    }
+
+    // 日付の新しい順に表示
+    const sorted = [...state.history].sort((a, b) => (b.date + b.startHour).localeCompare(a.date + a.startHour));
+
+    $('historyList').innerHTML = sorted.map(h => {
+      const st = computeStats(h);
+      const [y, m, d] = h.date.split('-').map(Number);
+      const wd = WEEKDAYS[new Date(y, m - 1, d).getDay()];
+      const dutyNames = (h.dutyIds || [])
+        .map(id => state.students.find(s => s.id === id))
+        .filter(Boolean)
+        .map(s => s.name)
+        .join('、') || '未設定';
+
+      return `
+        <div class="border border-slate-200 rounded-2xl p-3.5 bg-slate-50/70 space-y-2">
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <span class="font-black text-base text-slate-900">${h.date}（${wd}）</span>
+              <span class="ml-2 text-xs font-bold text-slate-600">${h.startHour}:${h.startMin}〜${h.endHour}:${h.endMin}</span>
+              <div class="text-sm font-bold text-blue-900 mt-0.5">${esc(h.gym || '会場未設定')}</div>
+            </div>
+            <div class="bg-white border border-slate-300 px-3 py-1.5 rounded-xl text-right">
+              <div class="text-[11px] font-bold text-slate-500">入館総数</div>
+              <div class="text-base font-black text-slate-900">${st.counts.grandTotal}名</div>
+            </div>
+          </div>
+
+          <div class="text-xs text-slate-600 bg-white p-2 rounded-xl border border-slate-200">
+            <div>生徒：出席${st.studentPresentCount}名 / 公欠${st.studentExcusedCount}名 / 欠席${st.studentAbsentCount}名</div>
+            <div class="mt-0.5">掃除当番：<strong>${esc(dutyNames)}</strong></div>
+          </div>
+
+          <div class="flex flex-wrap gap-2 pt-1">
+            <button type="button" data-edit-his="${h.id}" class="flex-1 bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold text-xs sm:text-sm py-2.5 rounded-xl">
+              編集する（公欠・当番修正）
+            </button>
+            <button type="button" data-pdf-his="${h.id}" class="bg-rose-700 hover:bg-rose-800 text-white font-bold text-xs sm:text-sm px-3.5 py-2.5 rounded-xl">
+              PDF再出力
+            </button>
+            <button type="button" data-del-his="${h.id}" class="bg-white border border-slate-300 text-slate-600 font-bold text-xs px-3 py-2.5 rounded-xl">
+              削除
+            </button>
+          </div>
+        </div>
+      `;
+    }).join('');
+  }
+
+  // =========================================================
+  // 描画：タブ4「名簿・会場」
+  // =========================================================
+  function initFiscalYearSelect() {
+    const curFy = getFiscalYear(todayStr());
+    const years = [curFy - 1, curFy, curFy + 1];
+    $('fiscalYearSelect').innerHTML = years.map(y => `<option value="${y}" ${y === curFy ? 'selected' : ''}>${y}年度（${y}/4〜${y + 1}/3）</option>`).join('');
+  }
+
+  function renderMasterTab() {
+    const fy = Number($('fiscalYearSelect').value) || getFiscalYear(todayStr());
+    const fyData = getFiscalYearAttendance(fy);
+    const dutyCounts = getStudentDutyCounts();
+
+    // 生徒名簿一覧
+    if (state.students.length === 0) {
+      $('masterStudentList').innerHTML = '<div class="py-6 text-center text-sm text-slate-400">生徒が登録されていません。「＋ 生徒を追加」から登録してください。</div>';
+    } else {
+      $('masterStudentList').innerHTML = state.students.map((s, idx) => {
+        const stStat = fyData.stats[s.id] || { present: 0, excused: 0, absent: 0, isPerfect: false };
+        const dCnt = dutyCounts[s.id] || 0;
+
+        let statusBadge = '';
+        if (s.status === 'trial') {
+          statusBadge = '<span class="px-1.5 py-0.5 text-xs font-black bg-amber-100 border-2 border-amber-500 text-amber-950 rounded">検討</span>';
+        } else if (s.status === 'withdrawn') {
+          statusBadge = '<span class="px-1.5 py-0.5 text-xs font-black bg-red-100 border-2 border-red-500 text-red-800 rounded">退会</span>';
+        }
+
+        const perfectBadge = stStat.isPerfect
+          ? '<span class="px-2 py-0.5 text-xs font-black bg-yellow-300 text-slate-950 rounded-full border border-yellow-500">★年度皆勤</span>'
+          : '';
+
+        return `
+          <div class="py-3 flex flex-wrap items-center justify-between gap-2 ${s.status === 'withdrawn' ? 'opacity-60' : ''}">
+            <div class="space-y-1">
+              <div class="flex items-center flex-wrap gap-1.5">
+                ${statusBadge}
+                <span class="font-bold text-base text-slate-900">${esc(s.name)}</span>
+                <span class="text-xs font-bold bg-slate-100 text-slate-700 px-2 py-0.5 rounded">${esc(s.grade)}（${esc(s.age)}歳）</span>
+                <span class="text-xs font-bold text-slate-600">${esc(s.sex)} / ${esc(s.rank || '無級')}</span>
+                ${perfectBadge}
+              </div>
+              <div class="text-xs text-slate-500 flex flex-wrap gap-x-3 gap-y-0.5">
+                <span>掃除当番累計：<strong>${dCnt}回</strong></span>
+                <span>${fy}年度：出席${stStat.present}・公欠${stStat.excused}・欠席${stStat.absent}</span>
+                ${s.joinDate ? `<span>入会日：${s.joinDate}</span>` : ''}
+              </div>
+            </div>
+
+            <div class="flex items-center gap-1.5">
+              <button type="button" data-move-st="${idx}" data-dir="-1" ${idx === 0 ? 'disabled' : ''} class="px-2.5 py-1.5 text-xs font-bold bg-slate-100 rounded-lg border border-slate-300 disabled:opacity-30">↑</button>
+              <button type="button" data-move-st="${idx}" data-dir="1" ${idx === state.students.length - 1 ? 'disabled' : ''} class="px-2.5 py-1.5 text-xs font-bold bg-slate-100 rounded-lg border border-slate-300 disabled:opacity-30">↓</button>
+              <button type="button" data-edit-st="${s.id}" class="px-3 py-1.5 text-xs font-bold bg-blue-50 text-blue-800 border border-blue-200 rounded-lg">編集</button>
+              <button type="button" data-del-st="${s.id}" class="px-2.5 py-1.5 text-xs font-bold bg-white text-red-600 border border-red-200 rounded-lg">削除</button>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    // 先生名簿一覧
+    if (state.teachers.length === 0) {
+      $('masterTeacherList').innerHTML = '<div class="py-4 text-center text-xs text-slate-400">先生が登録されていません</div>';
+    } else {
+      $('masterTeacherList').innerHTML = state.teachers.map((t, idx) => `
+        <div class="py-2.5 flex items-center justify-between gap-2">
+          <div>
+            <span class="font-bold text-sm text-slate-900">${esc(t.name)}</span>
+            <span class="ml-2 text-xs text-slate-500">（${esc(t.sex)} ／ PDF表示：${esc(extractSurname(t.name))}先生）</span>
+          </div>
+          <div class="flex items-center gap-1.5">
+            <button type="button" data-move-tc="${idx}" data-dir="-1" ${idx === 0 ? 'disabled' : ''} class="px-2.5 py-1 text-xs font-bold bg-slate-100 rounded-lg border border-slate-300 disabled:opacity-30">↑</button>
+            <button type="button" data-move-tc="${idx}" data-dir="1" ${idx === state.teachers.length - 1 ? 'disabled' : ''} class="px-2.5 py-1 text-xs font-bold bg-slate-100 rounded-lg border border-slate-300 disabled:opacity-30">↓</button>
+            <button type="button" data-del-tc="${t.id}" class="px-2.5 py-1 text-xs font-bold text-red-600 bg-white border border-red-200 rounded-lg">削除</button>
+          </div>
+        </div>
+      `).join('');
+    }
+
+    // 使用体育館一覧
+    $('masterGymList').innerHTML = state.gyms.map((g, idx) => `
+      <div class="inline-flex items-center gap-2 bg-slate-100 border border-slate-300 rounded-xl px-3 py-2 text-sm font-bold">
+        <span>${esc(g)}</span>
+        <button type="button" data-del-gym="${idx}" class="text-red-600 text-xs font-black px-1.5 py-0.5 rounded hover:bg-red-100">✕</button>
+      </div>
+    `).join('');
+  }
+
+  // =========================================================
+  // イベントリスナー設定
+  // =========================================================
+  function bindEvents() {
+    // タブ切り替え
+    document.querySelectorAll('.tab-btn').forEach(btn => {
+      btn.addEventListener('click', () => switchTab(btn.dataset.tab));
+    });
+
+    $('goSumBtn').addEventListener('click', () => switchTab('sum'));
+
+    // 基本情報変更
+    $('attDate').addEventListener('change', e => {
+      state.current.date = e.target.value;
+      updateWeekdayLabel(e.target.value);
+      saveState();
+    });
+    $('attGym').addEventListener('change', e => {
+      state.current.gym = e.target.value;
+      saveState();
+    });
+    ['startHour', 'startMin', 'endHour', 'endMin'].forEach(id => {
+      $(id).addEventListener('change', e => {
+        state.current[id] = e.target.value;
+        saveState();
+      });
+    });
+
+    // 標準状態に戻す（確認付き2段階ボタン）
+    let armResetDefault = false;
+    $('resetDefaultAttBtn').addEventListener('click', e => {
+      const btn = e.currentTarget;
+      if (!armResetDefault) {
+        armResetDefault = true;
+        btn.textContent = '本当に初期状態に戻す？';
+        btn.classList.add('bg-amber-200');
+        setTimeout(() => {
+          armResetDefault = false;
+          btn.textContent = '標準状態に戻す';
+          btn.classList.remove('bg-amber-200');
+        }, 3500);
+        return;
+      }
+      armResetDefault = false;
+      btn.textContent = '標準状態に戻す';
+      btn.classList.remove('bg-amber-200');
+      const keepEditingId = state.current.editingId;
+      state.current = createEmptyCurrent(state.students, state.teachers, state.gyms);
+      state.current.editingId = keepEditingId;
+      saveState();
+      renderAttendanceTab();
+      showToast('出欠チェックを標準状態に戻しました');
+    });
+
+    // 過去編集キャンセル
+    $('cancelEditBtn').addEventListener('click', () => {
+      state.current = createEmptyCurrent(state.students, state.teachers, state.gyms);
+      saveState();
+      renderAttendanceTab();
+      showToast('編集を終了し、新規入力画面に戻りました');
+    });
+
+    // 生徒行の横並びチェックボックス操作
+    $('studentAttList').addEventListener('change', e => {
+      const inp = e.target;
+      if (!inp.dataset || !inp.dataset.sid) return;
+      const sid = inp.dataset.sid;
+      const field = inp.dataset.field;
+      const a = state.current.studentAtt[sid];
+      if (!a) return;
+
+      a[field] = inp.checked;
+      // 「出席」と「公欠」は排他（片方をONにしたらもう片方をOFF）
+      if (field === 'present' && inp.checked) {
+        a.excused = false;
+      } else if (field === 'excused' && inp.checked) {
+        a.present = false;
+        // 公欠・欠席になった子が掃除当番に入っていたら外す
+        state.current.dutyIds = (state.current.dutyIds || []).filter(id => id !== sid);
+      } else if (field === 'present' && !inp.checked) {
+        state.current.dutyIds = (state.current.dutyIds || []).filter(id => id !== sid);
+      }
+
+      saveState();
+      renderAttendanceTab();
+    });
+
+    // 先生チェックボックス操作
+    $('teacherAttList').addEventListener('change', e => {
+      const inp = e.target;
+      if (!inp.dataset || !inp.dataset.tid) return;
+      state.current.teacherAtt[inp.dataset.tid] = inp.checked;
+      saveState();
+      renderAttendanceTab();
+    });
+
+    // 出稽古生徒の追加・入力・削除
+    $('addVisitorBtn').addEventListener('click', () => {
+      state.current.visitors.push({
+        id: uid(),
+        org: '',
+        cat: 'elem',
+        sex: '男',
+        name: '',
+        unknown: false
+      });
+      saveState();
+      renderAttendanceTab();
+    });
+
+    $('visitorStudentList').addEventListener('input', e => {
+      const el = e.target;
+      if (!el.dataset || !el.dataset.vid) return;
+      const v = state.current.visitors.find(x => x.id === el.dataset.vid);
+      if (!v) return;
+      if (el.dataset.vfield === 'unknown') {
+        v.unknown = el.checked;
+        if (v.unknown) v.name = '';
+        saveState();
+        renderAttendanceTab();
+      } else {
+        v[el.dataset.vfield] = el.value;
+        saveState();
+      }
+    });
+
+    $('visitorStudentList').addEventListener('change', e => {
+      const el = e.target;
+      if (!el.dataset || !el.dataset.vid) return;
+      const v = state.current.visitors.find(x => x.id === el.dataset.vid);
+      if (!v) return;
+      if (el.dataset.vfield === 'unknown') {
+        v.unknown = el.checked;
+        if (v.unknown) v.name = '';
+      } else {
+        v[el.dataset.vfield] = el.value;
+      }
+      saveState();
+      renderAttendanceTab();
+    });
+
+    $('visitorStudentList').addEventListener('click', e => {
+      const btn = e.target.closest('[data-del-visitor]');
+      if (!btn) return;
+      state.current.visitors = state.current.visitors.filter(x => x.id !== btn.dataset.delVisitor);
+      saveState();
+      renderAttendanceTab();
+    });
+
+    // 出稽古大人の男女カウンター
+    document.querySelectorAll('[data-vadult]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const key = btn.dataset.vadult === 'm' ? 'visitorAdultM' : 'visitorAdultF';
+        const delta = Number(btn.dataset.delta);
+        state.current[key] = Math.max(0, (state.current[key] || 0) + delta);
+        saveState();
+        renderAttendanceTab();
+      });
+    });
+
+    // 掃除当番：ランダム選出（3人）＆手動変更
+    $('pickDutyBtn').addEventListener('click', pickRandomEqualDuty);
+
+    $('dutySlots').addEventListener('change', e => {
+      const sel = e.target;
+      if (sel.dataset.dutySlot === undefined) return;
+      const idx = Number(sel.dataset.dutySlot);
+      state.current.dutyIds[idx] = sel.value;
+      saveState();
+    });
+
+    // PDF作成ボタン
+    $('createPdfBtn').addEventListener('click', async () => {
+      showToast('A4縦PDFを作成しています…');
+      await generateKeikoPdf(state.current);
+    });
+
+    // 「集計完了」／「更新」ボタン（確定＆名簿以外リセット）
+    $('completeBtn').addEventListener('click', () => {
+      const cur = state.current;
+      const record = JSON.parse(JSON.stringify(cur));
+
+      if (cur.editingId) {
+        // 過去履歴の更新
+        const idx = state.history.findIndex(h => h.id === cur.editingId);
+        record.id = cur.editingId;
+        delete record.editingId;
+        if (idx >= 0) state.history[idx] = record;
+        else state.history.unshift(record);
+        showToast('過去の稽古記録を更新しました');
+      } else {
+        // 新規集計完了
+        record.id = uid();
+        delete record.editingId;
+        state.history.unshift(record);
+        showToast('集計完了！履歴に保存し、当日の入力をリセットしました');
+      }
+
+      // 名簿と体育館登録はそのまま残し、当日の入力データのみリセット
+      state.current = createEmptyCurrent(state.students, state.teachers, state.gyms);
+      saveState();
+      switchTab('att');
+    });
+
+    // 過去の稽古タブの操作（編集・PDF再出力・削除）
+    $('historyList').addEventListener('click', async e => {
+      const btn = e.target.closest('button');
+      if (!btn) return;
+
+      if (btn.dataset.editHis) {
+        const target = state.history.find(h => h.id === btn.dataset.editHis);
+        if (!target) return;
+        state.current = JSON.parse(JSON.stringify(target));
+        state.current.editingId = target.id;
+        syncCurrentWithMaster();
+        saveState();
+        switchTab('att');
+        showToast(`${target.date} の記録を読み込みました。修正後に「更新」を押してください`);
+      } else if (btn.dataset.pdfHis) {
+        const target = state.history.find(h => h.id === btn.dataset.pdfHis);
+        if (!target) return;
+        showToast('PDFを作成しています…');
+        await generateKeikoPdf(target);
+      } else if (btn.dataset.delHis) {
+        if (btn.dataset.armed !== '1') {
+          btn.dataset.armed = '1';
+          btn.textContent = '本当に削除';
+          btn.classList.add('bg-red-600', 'text-white');
+          setTimeout(() => {
+            btn.dataset.armed = '';
+            btn.textContent = '削除';
+            btn.classList.remove('bg-red-600', 'text-white');
+          }, 3000);
+          return;
+        }
+        state.history = state.history.filter(h => h.id !== btn.dataset.delHis);
+        saveState();
+        renderHistoryTab();
+        showToast('履歴を削除しました');
+      }
+    });
+
+    // =========================================================
+    // 名簿・会場タブのイベント
+    // =========================================================
+    $('fiscalYearSelect').addEventListener('change', renderMasterTab);
+
+    let ageManuallyEdited = false;
+    $('stGrade').addEventListener('change', e => {
+      if (!ageManuallyEdited) {
+        $('stAge').value = GRADE_AGES[e.target.value] || '';
+      }
+    });
+    $('stAge').addEventListener('input', () => {
+      ageManuallyEdited = true;
+    });
+
+    $('addStudentBtn').addEventListener('click', () => {
+      $('editStudentId').value = '';
+      $('studentFormTitle').textContent = '新しい生徒を登録';
+      $('stName').value = '';
+      $('stSex').value = '男';
+      $('stGrade').value = '小1';
+      $('stAge').value = GRADE_AGES['小1'];
+      $('stRank').value = '無級';
+      $('stJoinDate').value = '';
+      document.querySelector('input[name="stStatus"][value="active"]').checked = true;
+      ageManuallyEdited = false;
+      $('studentFormCard').classList.remove('hidden');
+      $('stName').focus();
+    });
+
+    $('closeStudentFormBtn').addEventListener('click', () => {
+      $('studentFormCard').classList.add('hidden');
+    });
+
+    $('saveStudentBtn').addEventListener('click', () => {
+      const name = $('stName').value.trim();
+      if (!name) {
+        showToast('氏名を入力してください');
+        return;
+      }
+      const sex = $('stSex').value;
+      const grade = $('stGrade').value;
+      const age = $('stAge').value.trim() || String(GRADE_AGES[grade] || '');
+      const rank = $('stRank').value;
+      const joinDate = $('stJoinDate').value;
+      const status = document.querySelector('input[name="stStatus"]:checked').value;
+      const editId = $('editStudentId').value;
+
+      if (editId) {
+        const s = state.students.find(x => x.id === editId);
+        if (s) {
+          Object.assign(s, { name, sex, grade, age, rank, joinDate, status });
+          if (status === 'withdrawn' && state.current.studentAtt[s.id]) {
+            state.current.studentAtt[s.id].present = false;
+          }
+        }
+        showToast(`「${name}」の情報を更新しました`);
+      } else {
+        const newId = uid();
+        state.students.push({ id: newId, name, sex, grade, age, rank, joinDate, status });
+        state.current.studentAtt[newId] = {
+          present: status !== 'withdrawn',
+          excused: false,
+          father: false,
+          mother: false,
+          otherM: false,
+          otherF: false,
+          asTeacher: false,
+          linkedTeacherId: ''
+        };
+        showToast(`「${name}」を名簿に追加しました`);
+      }
+
+      $('studentFormCard').classList.add('hidden');
+      saveState();
+      renderMasterTab();
+    });
+
+    $('masterStudentList').addEventListener('click', e => {
+      const btn = e.target.closest('button');
+      if (!btn) return;
+
+      if (btn.dataset.editSt) {
+        const s = state.students.find(x => x.id === btn.dataset.editSt);
+        if (!s) return;
+        $('editStudentId').value = s.id;
+        $('studentFormTitle').textContent = `「${s.name}」の情報を編集`;
+        $('stName').value = s.name;
+        $('stSex').value = s.sex;
+        $('stGrade').value = s.grade;
+        $('stAge').value = s.age;
+        $('stRank').value = s.rank || '無級';
+        $('stJoinDate').value = s.joinDate || '';
+        const radio = document.querySelector(`input[name="stStatus"][value="${s.status || 'active'}"]`);
+        if (radio) radio.checked = true;
+        ageManuallyEdited = true;
+        $('studentFormCard').classList.remove('hidden');
+        $('studentFormCard').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      } else if (btn.dataset.moveSt !== undefined) {
+        const idx = Number(btn.dataset.moveSt);
+        const dir = Number(btn.dataset.dir);
+        const targetIdx = idx + dir;
+        if (targetIdx < 0 || targetIdx >= state.students.length) return;
+        [state.students[idx], state.students[targetIdx]] = [state.students[targetIdx], state.students[idx]];
+        saveState();
+        renderMasterTab();
+      } else if (btn.dataset.delSt) {
+        if (btn.dataset.armed !== '1') {
+          btn.dataset.armed = '1';
+          btn.textContent = '本当に削除';
+          setTimeout(() => { btn.dataset.armed = ''; btn.textContent = '削除'; }, 3000);
+          return;
+        }
+        const sid = btn.dataset.delSt;
+        state.students = state.students.filter(s => s.id !== sid);
+        delete state.current.studentAtt[sid];
+        saveState();
+        renderMasterTab();
+        showToast('生徒を削除しました');
+      }
+    });
+
+    // 先生名簿の追加・並び替え・削除
+    $('addTeacherBtn').addEventListener('click', () => {
+      const name = $('newTeacherName').value.trim();
+      if (!name) {
+        showToast('先生の氏名を入力してください');
+        return;
+      }
+      const id = uid();
+      state.teachers.push({ id, name, sex: $('newTeacherSex').value });
+      state.current.teacherAtt[id] = false;
+      $('newTeacherName').value = '';
+      saveState();
+      renderMasterTab();
+      showToast(`「${name}」を先生名簿に追加しました`);
+    });
+
+    $('masterTeacherList').addEventListener('click', e => {
+      const btn = e.target.closest('button');
+      if (!btn) return;
+      if (btn.dataset.moveTc !== undefined) {
+        const idx = Number(btn.dataset.moveTc);
+        const dir = Number(btn.dataset.dir);
+        const targetIdx = idx + dir;
+        if (targetIdx < 0 || targetIdx >= state.teachers.length) return;
+        [state.teachers[idx], state.teachers[targetIdx]] = [state.teachers[targetIdx], state.teachers[idx]];
+        saveState();
+        renderMasterTab();
+      } else if (btn.dataset.delTc) {
+        if (btn.dataset.armed !== '1') {
+          btn.dataset.armed = '1';
+          btn.textContent = '本当に削除';
+          setTimeout(() => { btn.dataset.armed = ''; btn.textContent = '削除'; }, 3000);
+          return;
+        }
+        const tid = btn.dataset.delTc;
+        state.teachers = state.teachers.filter(t => t.id !== tid);
+        delete state.current.teacherAtt[tid];
+        saveState();
+        renderMasterTab();
+        showToast('先生を削除しました');
+      }
+    });
+
+    // 使用体育館の追加・削除
+    $('addGymBtn').addEventListener('click', () => {
+      const g = $('newGymName').value.trim();
+      if (!g) {
+        showToast('体育館・会場名を入力してください');
+        return;
+      }
+      if (!state.gyms.includes(g)) {
+        state.gyms.push(g);
+      }
+      $('newGymName').value = '';
+      saveState();
+      renderMasterTab();
+      showToast(`会場「${g}」を追加しました`);
+    });
+
+    $('masterGymList').addEventListener('click', e => {
+      const btn = e.target.closest('[data-del-gym]');
+      if (!btn) return;
+      if (state.gyms.length <= 1) {
+        showToast('最低1つの会場が必要です');
+        return;
+      }
+      state.gyms.splice(Number(btn.dataset.delGym), 1);
+      saveState();
+      renderMasterTab();
+    });
+
+    // LINE共有用バックアップ（コピー＆読み込み）
+    $('copyShareBtn').addEventListener('click', () => {
+      const payload = JSON.stringify({
+        students: state.students,
+        teachers: state.teachers,
+        gyms: state.gyms,
+        history: state.history
+      });
+      const box = $('shareCodeBox');
+      box.value = payload;
+      box.select();
+      try {
+        document.execCommand('copy');
+        showToast('共有データをコピーしました！LINEに貼り付けて送れます');
+      } catch (e) {
+        showToast('枠内の文字を全選択してコピーしてください');
+      }
+    });
+
+    let armImport = false;
+    $('importShareBtn').addEventListener('click', () => {
+      const raw = $('shareCodeBox').value.trim();
+      if (!raw) {
+        showToast('先に共有コードを貼り付けてください');
+        return;
+      }
+      if (!armImport) {
+        armImport = true;
+        $('importShareBtn').textContent = '上書き読み込みを実行（再タップ）';
+        setTimeout(() => {
+          armImport = false;
+          $('importShareBtn').textContent = '貼り付けたデータを読み込む';
+        }, 4000);
+        return;
+      }
+      armImport = false;
+      $('importShareBtn').textContent = '貼り付けたデータを読み込む';
+
+      try {
+        const parsed = JSON.parse(raw);
+        if (!Array.isArray(parsed.students)) throw new Error('invalid');
+        state.students = parsed.students;
+        state.teachers = Array.isArray(parsed.teachers) ? parsed.teachers : [];
+        state.gyms = Array.isArray(parsed.gyms) && parsed.gyms.length ? parsed.gyms : ['体育館'];
+        state.history = Array.isArray(parsed.history) ? parsed.history : [];
+        state.current = createEmptyCurrent(state.students, state.teachers, state.gyms);
+        saveState();
+        $('shareCodeBox').value = '';
+        renderMasterTab();
+        showToast('名簿と履歴データを読み込みました');
+      } catch (e) {
+        showToast('データの形式が正しくありません。全体をコピーして貼り付けてください');
+      }
+    });
+  }
+
+  // 起動
+  initTimeSelectors();
+  initFiscalYearSelect();
+  loadState();
+  bindEvents();
+  renderAttendanceTab();
+})();
+</script>
+</body>
+</html>
